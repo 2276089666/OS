@@ -422,7 +422,177 @@
 
 ### 7.进程并发
 
+#### 7.1.进程互斥要求
+
+-  空闲让进
+- 忙则等待
+- 有限等待
+- 让权等待
+
+#### 7.2.进程互斥实现方法
+
+1. Software Approaches(软件实现)
+
+   >通过全局变量来控制程序执行，
+   >
+   >缺点: 程序在检测标志变量后，修改标志变量前发生中断，可能有多个进程进入临界区,出现问题
+
+2. HardWare Support(硬件支持)
+
+   >1. 关闭中断
+   >
+   >   >利用“开/关中断指令”实现
+   >   >
+   >   >与原语的实现思想相同，即在某进程开始访问临界区到结束访问为止都不允许被中断，也就不能发生进程切换，因此也不可能发生两个同时访问临界区的情况
+   >   >
+   >   >缺点: 不适用于多处理机, 只适用于操作系统内核进程，不适用于用户进程（因为关/开中断指令只能运行在内核态）。
+   >
+   >2. 指令实现
+   >
+   >   >TestAndSet 或 Exchange
+   >   >
+   >   >原语指令执行过程不允许中断
+   >   >
+   >   >缺点: 会有忙等待,违背 "让权等待" 原则
+
+3. Semaphores(信号量)
+
+   >一个整型变量 + 一个阻塞队列(java的实现是基于AQS)
+   >
+   >wait原语指令: 
+   >
+   >- **先判断count<0,是则资源不可用,进入阻塞队列,让权等待,并将count减一,表示有请求者**;
+   >
+   >- **否则,资源可用,并将count减一**
+   >
+   >signal原语指令: 
+   >
+   >- **先将count加一**
+   >
+   >- **判断count<=0,是则有请求者,唤醒阻塞队列中的一个进程或线程**
+   >
+   >
+   >
+   >优点:解决了指令级别实现互斥的"忙等待"或无法"让权等待"问题
+
+4. Monitors(管程)
+
+   >Java的synchronized就是使用管程实现的
+   >
+   >**管程提供了一种机制，线程可以临时放弃互斥访问，等待某些条件得到满足后，重新获得执行权恢复它的互斥访问。**
+   >
+   >**如何解决互斥呢？**我们可以在操作共享变量之前，增加一个等待队列，每一个线程想要操作共享变量的话，都需要在等待队列中等待，**直到管程选出一个线程操作共享变量**。
+   >
+   >**那又是如何解决同步的呢？**线程在操作共享变量时候，它不一定是直接执行，可能有一些自己的执行条件限制（比如取钱操作要求账户里一定要有钱，出队操作要求队列一定不能是空的），我们将这些限制称之为条件变量，每一个条件变量也有自己对应的等待队列，当线程发现自己的条件变量不满足时，就进入相应的等待队列中排队，直至条件变量满足，那么其等待队列中的线程也不会是立马执行，而是到最开始共享变量对应的等待队列中再次排队，重复之前的过程。
+   ><img src="README.assets/image-20210707194817352.png" alt="image-20210707194817352" style="zoom:80%;" />
+
+#### 7.3.生产者消费者
+
+>**要求**：共享的buffer同时只能有一个生产者或消费者使用，所以多了一个互斥信号量
+
+<img src="README.assets/image-20210707153944189.png" alt="image-20210707153944189" style="zoom:80%;" />
+
+<img src="README.assets/image-20210707160913014.png" alt="image-20210707160913014" style="zoom:80%;" />
+
+#### 7.4.读写者
+
+1. 读者
+
+   ```java
+   		@Override
+           public void lock() {
+               try {
+                   read.acquire();
+                   readCount++;
+                   // 读写互斥,读读不互斥
+                   if (readCount == 1) {
+                       readWrite.acquire();
+                   }
+                   read.release();
+               } catch (InterruptedException e) {
+                   e.printStackTrace();
+               }
+           }
+   
+   
+           @Override
+           public void unlock() {
+               try {
+                   read.acquire();
+               } catch (InterruptedException e) {
+                   e.printStackTrace();
+               }
+               readCount--;
+               // 没有读者,让写者运行
+               if (readCount == 0) {
+                   readWrite.release();
+               }
+               read.release();
+           }
+   
+   ```
+
+   
+
+2. 写者
+
+   ```java
+     		@Override
+           public void lock() {
+               try {
+                   readWrite.acquire();
+               } catch (InterruptedException e) {
+                   e.printStackTrace();
+               }
+           }
+   
+           @Override
+           public void unlock() {
+               readWrite.release();
+           }
+   ```
+
+[自定义读写锁测试代码](src/main/java/com/os/readWriteLock/TestMyReadWriteLock.java)
+
 ### 8.死锁与饥饿
+
+#### 8.1.死锁的必要条件
+
+1. 互斥
+
+   >请求的资源互斥
+
+2. 请求和保持
+
+   >请求新的资源，没得到，阻塞，但是对已有的不释放
+
+3. 不可抢占
+
+   >进程已获得资源应由其自己释放，不能在未完成使用前被其他进程抢占
+
+4. 循环等待（充分条件--->形成环路必然死锁，满足前面三个条件只会可能死锁）
+
+   >进程之间请求资源形成环路
+
+#### 8.2.死锁的处理
+
+1. 预防死锁（都不可行）
+
+   ><img src="README.assets/image-20210707221643043.png" alt="image-20210707221643043" style="zoom:80%;" />
+   >
+   ><img src="README.assets/image-20210707221722329.png" alt="image-20210707221722329" style="zoom:80%;" />
+
+2. 避免死锁
+
+   >银行家算法
+
+3. 检测死锁
+
+   >事先不采取措施，允许死锁发生，OS周期性的执行死锁检测的例程，检测系统中是否出现“环路等待”
+
+4. 解除死锁
+
+   >检测到死锁已经发生，撤销一些进程，回收它的资源，将其分配给因资源导致阻塞的进程运行
 
 ### 9.存储管理
 
@@ -735,6 +905,100 @@
 <img src="README.assets/image-20210704214940728.png" alt="image-20210704214940728" style="zoom:80%;" />
 
 <img src="README.assets/image-20210704220432144.png" alt="image-20210704220432144" style="zoom:80%;" />
+
+#### 10.6.RAID磁盘冗余阵列
+
+该系统是利用一台磁盘阵列控制器来统一管理和控制一组(几台到几十台)磁盘驱动器,组成一个大型磁盘系统
+
+<img src="README.assets/image-20210705101145188.png" alt="image-20210705101145188" style="zoom:80%;" />
+
+<img src="README.assets/image-20210705101250932.png" alt="image-20210705101250932" style="zoom:80%;" />
+
+![image-20210705101719890](README.assets/image-20210705101719890.png)
+
+<img src="README.assets/image-20210705101758888.png" alt="image-20210705101758888" style="zoom:50%;" />
+
+------
+
+### 11.文件系统
+
+#### 11.1.文件系统的总体结构
+
+![image-20210705115703931](README.assets/image-20210705115703931.png)
+
+<img src="README.assets/image-20210705120425547.png" alt="image-20210705120425547" style="zoom:80%;" />
+
+<img src="README.assets/image-20210705121012048.png" alt="image-20210705121012048" style="zoom:80%;" />
+
+<img src="README.assets/image-20210705121628862.png" alt="image-20210705121628862" style="zoom:80%;" />
+
+<img src="README.assets/image-20210705122301040.png" alt="image-20210705122301040" style="zoom:80%;" />
+
+<img src="README.assets/image-20210705131334576.png" alt="image-20210705131334576" style="zoom:80%;" />
+
+Access Method的不同文件:
+
+1. Pile(堆文件)
+
+   >数据随着时间的先后堆积的方式存储,没有结构,检索一条记录非常耗时
+
+2. Sequential(顺序文件)
+
+   >每条数据记录的格式相同,长度相同,有一个主键,文件按照主键排序,检索单条数据需要遍历主键
+
+3. Indexed Sequential(索引顺序文件)
+
+   >为某个域立一个索引,并按照索引排序
+   >
+   >例如:10000条的数据,建立10条索引,每条索引的数据范围是1000条;
+   >
+   >采用**顺序文件**没有索引的方式查找**单条数据的平均访问次数**是:5000
+   >
+   >采用**索引顺序文件**的方式查找**单条数据的平均访问次数**是:5+500=505
+
+4. Indexed(索引文件)
+
+   >索引不用排序,可建立多个字段索引
+
+5. Hash(hash文件)
+
+   >利用hash函数计算记录的存储位置
+
+#### 11.2.文件分配方式
+
+1. 连续分配
+
+   ><img src="README.assets/image-20210705152318668.png" alt="image-20210705152318668" style="zoom:80%;" />
+
+2. 链接分配
+
+   ><img src="README.assets/image-20210705152400579.png" alt="image-20210705152400579" style="zoom:80%;" />
+
+3. 索引分配
+
+   ><img src="README.assets/image-20210705152457528.png" alt="image-20210705152457528" style="zoom:80%;" />
+   >
+   >多级索引分配
+   >
+   ><img src="README.assets/image-20210705152752298.png" alt="image-20210705152752298" style="zoom:80%;" />
+
+#### 11.3.Disk的空闲空间管理
+
+1. Bit table(位表)
+
+   ><img src="README.assets/image-20210705153013318.png" alt="image-20210705153013318" style="zoom:80%;" />
+   >
+   ><img src="README.assets/image-20210705153043669.png" alt="image-20210705153043669" style="zoom:80%;" />
+
+2. Chained free portion(空闲分区链)
+
+   ><img src="README.assets/image-20210705153145738.png" alt="image-20210705153145738" style="zoom:80%;" />
+
+3. Index(索引)
+
+   ><img src="README.assets/image-20210705153228668.png" alt="image-20210705153228668" style="zoom:80%;" />
+
+
 
 
 
